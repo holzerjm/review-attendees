@@ -1,0 +1,227 @@
+/**
+ * @OnlyCurrentDoc
+ * This script adds custom menus to a Google Sheet to approve or reject rows.
+ * Enhanced to support bulk operations on multiple selected rows, including
+ * non-adjacent selections.
+ * 
+ * Replace [INSERT YOUR SHEET NAME] with your sheet name to use for accept/reject
+ * also make sure you have the following columns configured
+ *    ["Status", "DecisionNotes", "ReviewerEmail", "UpdatedAt"]
+ * 
+ */
+
+function onOpen() {
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('Attendee Review')
+    .addItem('Accept Selected Row(s)', 'acceptRow')
+    .addItem('Reject Selected Row(s)', 'rejectRow')
+    .addToUi();
+}
+
+function getColumnIndex(sheet, columnName) {
+  const headerRange = sheet.getRange(1, 1, 1, sheet.getLastColumn());
+  const headerValues = headerRange.getValues()[0];
+  const index = headerValues.indexOf(columnName);
+  return index + 1;
+}
+
+function getColumnIndices() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(); // Get the CURRENT sheet
+  
+  // ADDED: Check if the user is on the correct sheet.
+  if (sheet.getName() !== "[INSERT YOUR SHEET NAME]") {
+    SpreadsheetApp.getUi().alert('Error: Please run this script on the "[INSERT YOUR SHEET NAME] sheet.');
+    return null;
+  }
+
+  const requiredColumns = ["Status", "DecisionNotes", "ReviewerEmail", "UpdatedAt"];
+  const indices = {};
+
+  for (const colName of requiredColumns) {
+    const index = getColumnIndex(sheet, colName);
+    if (index === 0) {
+      SpreadsheetApp.getUi().alert(`Error: Column "${colName}" not found in sheet!`);
+      return null;
+    }
+    indices[colName] = index;
+  }
+  
+  indices.sheet = sheet;
+  return indices;
+}
+
+/**
+ * Gets all selected row numbers from potentially non-adjacent selections, 
+ * excluding the header row.
+ * @returns {number[]} Array of unique row numbers, sorted.
+ */
+function getSelectedRows() {
+  const rangeList = SpreadsheetApp.getActiveRangeList();
+  if (!rangeList) {
+    return [];
+  }
+  
+  const ranges = rangeList.getRanges();
+  const rowSet = new Set(); // Use a Set to automatically handle duplicates
+
+  ranges.forEach(range => {
+    const startRow = range.getRow();
+    const numRows = range.getNumRows();
+    
+    for (let i = 0; i < numRows; i++) {
+      const rowNum = startRow + i;
+      if (rowNum > 1) { // Skip header row
+        rowSet.add(rowNum);
+      }
+    }
+  });
+  
+  // Convert Set to sorted array for consistent processing
+  const rows = Array.from(rowSet);
+  rows.sort((a, b) => a - b); 
+  
+  return rows;
+}
+
+
+/**
+ * Accepts the selected row(s).
+ */
+function acceptRow() {
+  const ui = SpreadsheetApp.getUi();
+  const rows = getSelectedRows();
+
+  if (rows.length === 0) {
+    ui.alert('Please select one or more data rows (not the header row).');
+    return;
+  }
+
+  // Confirm action
+  const rowText = rows.length === 1 ? `row ${rows[0]}` : `${rows.length} selected rows`;
+  const response = ui.alert('Accept Rows?', `Are you sure you want to mark ${rowText} as "Accepted"?`, ui.ButtonSet.YES_NO);
+  
+  if (response === ui.Button.NO) {
+    return;
+  }
+
+  const indices = getColumnIndices();
+  if (!indices) return;
+
+  const sheet = indices.sheet;
+  const userEmail = Session.getEffectiveUser().getEmail(); // RESTORED
+  const timestamp = new Date();
+
+  // --- BATCH UPDATE (V3) ---
+  // This is more efficient and the error was likely not caused by this.
+  const statusRangesA1 = [];
+  const emailRangesA1 = [];
+  const updatedRangesA1 = [];
+  const notesRangesA1 = [];
+
+  rows.forEach(rowNum => {
+    statusRangesA1.push(sheet.getRange(rowNum, indices.Status).getA1Notation());
+    emailRangesA1.push(sheet.getRange(rowNum, indices.ReviewerEmail).getA1Notation());
+    updatedRangesA1.push(sheet.getRange(rowNum, indices.UpdatedAt).getA1Notation());
+    notesRangesA1.push(sheet.getRange(rowNum, indices.DecisionNotes).getA1Notation());
+  });
+
+  if (rows.length > 0) {
+    sheet.getRangeList(statusRangesA1).setValue("Accepted");
+    sheet.getRangeList(emailRangesA1).setValue(userEmail);
+    sheet.getRangeList(updatedRangesA1).setValue(timestamp);
+    sheet.getRangeList(notesRangesA1).setValue("");
+  }
+  // --- END BATCH UPDATE ---
+
+  // SpreadsheetApp.flush(); // Removed, not strictly necessary
+  ui.alert(`${rows.length} row(s) marked as "Accepted".`);
+}
+
+/**
+ * Rejects the selected row(s).
+ * Uses the same rejection note for all selected rows.
+ */
+function rejectRow() {
+  const ui = SpreadsheetApp.getUi();
+  const rows = getSelectedRows();
+
+  if (rows.length === 0) {
+    ui.alert('Please select one or more data rows (not the header row).');
+    return;
+  }
+
+  // Get rejection notes
+  const rowText = rows.length === 1 ? `row ${rows[0]}` : `${rows.length} selected rows`;
+  const notesResponse = ui.prompt(
+    'Decision Notes', 
+    `Please provide a reason for rejecting ${rowText} (required):`, 
+    ui.ButtonSet.OK_CANCEL
+  );
+  
+  if (notesResponse.getSelectedButton() === ui.Button.CANCEL) {
+    return;
+  }
+  
+  const notes = notesResponse.getResponseText();
+  if (!notes) {
+    ui.alert('Rejection requires a note. Action cancelled.');
+    return;
+  }
+
+  // Confirm rejection
+  const confirmText = rows.length === 1 ? `row ${rows[0]}` : `${rows.length} selected rows`;
+  const confirmResponse = ui.alert(
+    'Reject Rows?', 
+    `Are you sure you want to mark ${confirmText} as "Rejected"?`, 
+    ui.ButtonSet.YES_NO
+  );
+  
+  if (confirmResponse === ui.Button.NO) {
+    return;
+  }
+  
+  const indices = getColumnIndices();
+  if (!indices) return;
+
+  const sheet = indices.sheet;
+  const userEmail = Session.getEffectiveUser().getEmail(); // RESTORED
+  const timestamp = new Date();
+
+  // --- BATCH UPDATE (V3) ---
+  const statusRangesA1 = [];
+  const emailRangesA1 = [];
+  const updatedRangesA1 = [];
+  const notesRangesA1 = [];
+
+  rows.forEach(rowNum => {
+    statusRangesA1.push(sheet.getRange(rowNum, indices.Status).getA1Notation());
+    emailRangesA1.push(sheet.getRange(rowNum, indices.ReviewerEmail).getA1Notation());
+    updatedRangesA1.push(sheet.getRange(rowNum, indices.UpdatedAt).getA1Notation());
+    notesRangesA1.push(sheet.getRange(rowNum, indices.DecisionNotes).getA1Notation());
+  });
+
+  if (rows.length > 0) {
+    sheet.getRangeList(statusRangesA1).setValue("Rejected");
+    sheet.getRangeList(emailRangesA1).setValue(userEmail);
+    sheet.getRangeList(updatedRangesA1).setValue(timestamp);
+    sheet.getRangeList(notesRangesA1).setValue(notes);
+  }
+  // --- END BATCH UPDATE ---
+
+  // SpreadsheetApp.flush(); // Removed, not strictly necessary
+  ui.alert(`${rows.length} row(s) marked as "Rejected".`); // ADDED THIS ALERT
+}
+
+/**
+ * !!!!!!!!!!!!!!!
+ * TEMPORARY DUMMY FUNCTION TO FORCE RE-AUTHORIZATION.
+ * YOU CAN DELETE THIS FUNCTION AFTER STEP 3.
+ * !!!!!!!!!!!!!!!
+ */
+function forceReAuth() {
+  // This line requires a new permission and will force the auth popup.
+  MailApp.getRemainingDailyQuota();
+  Logger.log("Re-authorization successful.");
+}function myFunction() {
+  
+}
