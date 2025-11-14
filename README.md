@@ -5,7 +5,7 @@ This script supports selecting:
 	Multiple adjacent rows
 	Multiple non-adjacent rows (e.g., by holding Ctrl or Cmd while clicking)
 1. Setup Instructions
-	Step 1: Prepare Your Google Sheet
+Step 1: Prepare Your Google Sheet
 	Create a new Google Sheet (or open an existing one).
 	Create a sheet tab (or rename an existing one) to Recommended Executives. This exact name is required for the script to work.
 	In the first row (row 1) of this sheet, create the following headers. The spelling and capitalization must match:
