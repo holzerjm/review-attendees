@@ -4,7 +4,7 @@
  * Enhanced to support bulk operations on multiple selected rows, including
  * non-adjacent selections.
  * 
- * Replace [INSERT YOUR SHEET NAME] with your sheet name to use for accept/reject
+ * The script is configured to work with a sheet named "Recommended Executives".
  * also make sure you have the following columns configured
  *    ["Status", "DecisionNotes", "ReviewerEmail", "UpdatedAt"]
  * 
@@ -29,8 +29,8 @@ function getColumnIndices() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(); // Get the CURRENT sheet
   
   // ADDED: Check if the user is on the correct sheet.
-  if (sheet.getName() !== "[INSERT YOUR SHEET NAME]") {
-    SpreadsheetApp.getUi().alert('Error: Please run this script on the "[INSERT YOUR SHEET NAME] sheet.');
+  if (sheet.getName() !== "Recommended Executives") {
+    SpreadsheetApp.getUi().alert('Error: Please run this script on the "Recommended Executives" sheet.');
     return null;
   }
 
